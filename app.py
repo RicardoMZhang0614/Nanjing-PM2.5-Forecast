@@ -350,7 +350,9 @@ def main() -> None:
         )
         return
 
-    if result.is_demo:
+    is_demo_result = bool(getattr(result, "is_demo", result.data_mode in {"historical demo", "packaged demo"}))
+
+    if is_demo_result:
         st.markdown(
             f"""
             <div class="notice-box">
