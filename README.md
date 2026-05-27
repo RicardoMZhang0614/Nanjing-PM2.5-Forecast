@@ -4,7 +4,7 @@ This folder contains a standalone Streamlit app for predicting the next-day PM2.
 
 ## Purpose
 
-The original research project explains historical PM2.5 variation. This app turns the modeling work into a usable forecast tool. It loads trained models, collects recent Open-Meteo air-quality data, obtains the target day's weather forecast, constructs the required feature row, and predicts the next valid daily PM2.5 value.
+The original research project explains historical PM2.5 variation. This app turns the work into a usable forecast tool. Its primary website forecast is the next-day PM2.5 value from Open-Meteo's Air Quality forecast endpoint, aggregated from hourly values into a daily mean. The research models are retained for context, uncertainty, and cross-checking.
 
 ## What It Shows
 
@@ -15,18 +15,22 @@ The original research project explains historical PM2.5 variation. This app turn
 - cross-check between the main XGBoost model and the conservative one-day-ahead model
 - key input variables used by the model
 
-## Model Logic
+## Forecast Logic
 
-The primary forecast uses the trained XGBoost model from the research project. The model expects same-day weather features, so the app supplies those features using Open-Meteo weather forecast data for the target date. This avoids using observed future weather.
+The primary forecast uses the Open-Meteo Air Quality PM2.5 forecast for the target date. This makes the web app operational: it can forecast tomorrow even when the research model's lag features are incomplete.
 
-The app also runs a conservative cross-check model:
+The app also runs or displays research-model context where available:
 
-- Primary model: XGBoost, historical holdout MAE 10.82
+- Research model: XGBoost, historical holdout MAE 10.82
 - Conservative model: Forecast Random Forest, historical holdout MAE 14.13
 
 The displayed uncertainty range uses the more conservative MAE so the app does not overstate precision.
 
+For live PM2.5 lags, the app first uses Open-Meteo's relative `past_days` / `forecast_days` request format rather than a fixed historical date range. This is important because fixed date-range requests can return stale modeled air-quality archives, while the relative request is better suited for current short-term use.
+
 If the Open-Meteo weather forecast endpoint is temporarily rate-limited, the app can still produce a degraded live forecast by combining live recent PM2.5 data with same-season weather averages from the packaged Nanjing training dataset. The interface labels this clearly as a fallback forecast.
+
+If the Open-Meteo air-quality forecast endpoint itself is temporarily unavailable or rate-limited, the app still returns tomorrow's date using a lower-confidence same-season PM2.5 baseline from the packaged Nanjing dataset. This fallback is clearly labeled and should be interpreted as a continuity mode, not as the best available live forecast.
 
 ## How to Run
 

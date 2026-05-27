@@ -150,6 +150,7 @@ class ForecastResult:
     conservative_mae: float | None
     is_demo: bool = False
     is_degraded: bool = False
+    forecast_source: str = "Research ML model"
 
 
 class ForecastInputError(RuntimeError):
@@ -241,14 +242,6 @@ def _aggregate_weather(hourly: pd.DataFrame) -> pd.DataFrame:
 
 def fetch_recent_pm25(reference_date: date, lookback_days: int = 80) -> pd.DataFrame:
     start_date = reference_date - timedelta(days=lookback_days)
-    dated_params = {
-        "latitude": LATITUDE,
-        "longitude": LONGITUDE,
-        "start_date": start_date.isoformat(),
-        "end_date": reference_date.isoformat(),
-        "timezone": TIMEZONE,
-        "hourly": "pm2_5",
-    }
     relative_params = {
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
@@ -257,11 +250,40 @@ def fetch_recent_pm25(reference_date: date, lookback_days: int = 80) -> pd.DataF
         "timezone": TIMEZONE,
         "hourly": "pm2_5",
     }
+    dated_params = {
+        "latitude": LATITUDE,
+        "longitude": LONGITUDE,
+        "start_date": start_date.isoformat(),
+        "end_date": reference_date.isoformat(),
+        "timezone": TIMEZONE,
+        "hourly": "pm2_5",
+    }
     try:
-        payload = _request_json(AIR_QUALITY_URL, dated_params)
-    except Exception:
         payload = _request_json(AIR_QUALITY_URL, relative_params)
+    except Exception:
+        payload = _request_json(AIR_QUALITY_URL, dated_params)
     return _aggregate_air_quality(_hourly_payload_to_frame(payload))
+
+
+def split_air_quality_forecast(daily: pd.DataFrame, target_date: date) -> tuple[pd.DataFrame, float, int | None]:
+    frame = daily.copy()
+    frame = frame[frame["pm25"].notna()].sort_values("date").reset_index(drop=True)
+    frame["date_only"] = frame["date"].dt.date
+    target_rows = frame[frame["date_only"] == target_date]
+    if target_rows.empty:
+        available = ", ".join(str(value) for value in frame["date_only"].tail(5).tolist())
+        raise ForecastInputError(
+            f"Open-Meteo did not return a PM2.5 forecast for {target_date}. "
+            f"Latest available dates: {available or 'none'}."
+        )
+
+    target = target_rows.iloc[-1]
+    history = frame[frame["date_only"] < target_date].drop(columns=["date_only"]).reset_index(drop=True)
+    if len(history) < 30:
+        raise ForecastInputError("Open-Meteo returned fewer than 30 pre-target PM2.5 days.")
+
+    hours = int(target["pm25_hour_count"]) if not pd.isna(target["pm25_hour_count"]) else None
+    return history, float(target["pm25"]), hours
 
 
 def fetch_weather_window(start_date: date, end_date: date) -> pd.DataFrame:
@@ -449,6 +471,38 @@ def weather_climatology_for_target(target_date: date) -> pd.DataFrame:
     )
 
 
+def pm25_climatology_series(target_date: date, days: int = 80) -> tuple[pd.DataFrame, float]:
+    packaged = load_packaged_dataset()
+    packaged["day_of_year"] = packaged["date"].dt.dayofyear
+
+    def circular_distance(value: int, target_doy: int) -> int:
+        raw = abs(value - target_doy)
+        return min(raw, 366 - raw)
+
+    rows = []
+    start_date = target_date - timedelta(days=days)
+    current = start_date
+    while current <= target_date:
+        target_doy = current.timetuple().tm_yday
+        distances = packaged["day_of_year"].apply(lambda value: circular_distance(value, target_doy))
+        values = packaged.loc[distances <= 21, "pm25"]
+        if values.empty:
+            values = packaged.nsmallest(45, "day_of_year")["pm25"]
+        rows.append(
+            {
+                "date": pd.Timestamp(current),
+                "pm25": float(values.mean()),
+                "pm25_hour_count": 0,
+            }
+        )
+        current += timedelta(days=1)
+
+    series = pd.DataFrame(rows)
+    target_prediction = float(series[series["date"].dt.date == target_date].iloc[0]["pm25"])
+    history = series[series["date"].dt.date < target_date].reset_index(drop=True)
+    return history, target_prediction
+
+
 def feature_rows(
     target_date: date,
     history: pd.DataFrame,
@@ -481,6 +535,39 @@ def feature_rows(
     return primary_frame, conservative_frame
 
 
+def fallback_primary_feature_row(
+    target_date: date,
+    history: pd.DataFrame,
+    weather_daily: pd.DataFrame,
+    primary_features: list[str],
+) -> pd.DataFrame:
+    weather_daily = weather_daily.copy()
+    weather_daily["date_only"] = pd.to_datetime(weather_daily["date"]).dt.date
+    target_weather = weather_daily[weather_daily["date_only"] == target_date]
+    if target_weather.empty:
+        weather_daily = weather_climatology_for_target(target_date)
+        weather_daily["date_only"] = pd.to_datetime(weather_daily["date"]).dt.date
+        target_weather = weather_daily[weather_daily["date_only"] == target_date]
+
+    row: dict[str, float | int] = {}
+    row.update(calendar_values(target_date))
+
+    hist = history.copy()
+    hist["date_only"] = pd.to_datetime(hist["date"]).dt.date
+    pm25_by_date = hist.set_index("date_only")["pm25"].to_dict()
+    latest_value = float(hist.sort_values("date").iloc[-1]["pm25"])
+    for lag in [1, 2, 3, 7, 14]:
+        row[f"pm25_lag{lag}"] = float(pm25_by_date.get(target_date - timedelta(days=lag), latest_value))
+
+    prior = hist[hist["date_only"] < target_date].sort_values("date").tail(30)
+    row["pm25_roll7_mean"] = float(prior.tail(7)["pm25"].mean())
+    row["pm25_roll14_mean"] = float(prior.tail(14)["pm25"].mean())
+    row["pm25_roll30_mean"] = float(prior.tail(30)["pm25"].mean())
+    row["pm25_roll7_std"] = float(prior.tail(7)["pm25"].std())
+    row.update(target_weather.iloc[0][WEATHER_COLUMNS].to_dict())
+    return pd.DataFrame([row])[primary_features].astype(float)
+
+
 def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> ForecastResult:
     reference_date = reference_date or date.today()
     requested_target = reference_date + timedelta(days=1)
@@ -489,12 +576,20 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
 
     if use_live:
         try:
-            history, target_date, data_note = choose_live_history(reference_date, requested_target)
+            target_date = requested_target
+            air_quality_daily = fetch_recent_pm25(reference_date)
+            history, operational_prediction, target_pm25_hours = split_air_quality_forecast(air_quality_daily, target_date)
+            data_note = (
+                "Primary forecast is the daily mean of Open-Meteo Air Quality hourly PM2.5 forecast "
+                f"for {target_date}. Target-day hourly values: {target_pm25_hours or 'n/a'}."
+            )
+            operational_model_name = "Open-Meteo PM2.5 forecast"
+            operational_source = "Open-Meteo Air Quality forecast"
             is_degraded = False
             try:
                 weather_daily = fetch_weather_window(target_date - timedelta(days=1), target_date)
                 weather_note = "Weather inputs come from the Open-Meteo forecast endpoint for the target day."
-                data_mode = "live forecast"
+                data_mode = "live PM2.5 forecast"
             except Exception as weather_exc:
                 weather_daily = weather_climatology_for_target(target_date)
                 weather_note = (
@@ -506,10 +601,21 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
                 is_degraded = True
             is_demo = False
         except Exception as exc:
-            raise ForecastInputError(
-                "Live next-day forecast is unavailable because the app could not retrieve sufficiently recent "
-                f"Open-Meteo inputs. Details: {exc}"
-            ) from exc
+            target_date = requested_target
+            history, operational_prediction = pm25_climatology_series(target_date)
+            weather_daily = weather_climatology_for_target(target_date)
+            data_note = (
+                "Open-Meteo live PM2.5 forecast was unavailable or rate-limited. "
+                "The app used a same-season historical PM2.5 baseline from the packaged Nanjing dataset. "
+                f"Live API detail: {exc}"
+            )
+            weather_note = "Weather features use same-season historical weather averages from the packaged Nanjing dataset."
+            data_mode = "seasonal PM2.5 fallback"
+            target_pm25_hours = None
+            operational_model_name = "Seasonal PM2.5 fallback"
+            operational_source = "Packaged seasonal PM2.5 baseline"
+            is_demo = False
+            is_degraded = True
     else:
         history, target_date, data_note = choose_packaged_demo_history()
         weather_daily = weather_for_packaged_target(target_date)
@@ -517,17 +623,35 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
         data_mode = "historical demo"
         is_demo = True
         is_degraded = False
+        target_pm25_hours = None
+        operational_prediction = None
+        operational_model_name = primary_model_name
+        operational_source = "Research ML model"
 
-    primary_frame, conservative_frame = feature_rows(
-        target_date=target_date,
-        history=history,
-        weather_daily=weather_daily,
-        primary_features=primary_features,
-        conservative_features=conservative_features,
-    )
+    primary_frame = fallback_primary_feature_row(target_date, history, weather_daily, primary_features)
+    try:
+        _, conservative_frame = feature_rows(
+            target_date=target_date,
+            history=history,
+            weather_daily=weather_daily,
+            primary_features=primary_features,
+            conservative_features=conservative_features,
+        )
+        conservative_prediction = float(conservative_model.predict(conservative_frame)[0])
+    except ForecastInputError:
+        conservative_prediction = None
 
-    primary_prediction = float(primary_model.predict(primary_frame)[0])
-    conservative_prediction = float(conservative_model.predict(conservative_frame)[0])
+    if use_live and operational_prediction is not None:
+        primary_prediction = float(operational_prediction)
+        display_model_name = operational_model_name
+        display_mae = conservative_mae
+        forecast_source = operational_source
+    else:
+        primary_prediction = float(primary_model.predict(primary_frame)[0])
+        display_model_name = primary_model_name
+        display_mae = primary_mae
+        forecast_source = "Research ML model"
+
     uncertainty_mae = max(primary_mae, conservative_mae)
     expected_low = max(0.0, primary_prediction - uncertainty_mae)
     expected_high = primary_prediction + uncertainty_mae
@@ -548,19 +672,20 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
         category=category,
         category_color=category_color(category),
         uncertainty_mae=uncertainty_mae,
-        primary_model_name=primary_model_name,
+        primary_model_name=display_model_name,
         conservative_model_name=conservative_model_name,
         latest_pm25_date=pd.to_datetime(latest["date"]).date(),
         latest_pm25=float(latest["pm25"]),
-        latest_pm25_hours=latest_hours,
+        latest_pm25_hours=target_pm25_hours if use_live else latest_hours,
         data_mode=data_mode,
         data_note=data_note,
         weather_note=weather_note,
         feature_row=primary_frame,
         history=history_tail,
         weather_daily=weather_daily,
-        primary_mae=primary_mae,
+        primary_mae=display_mae,
         conservative_mae=conservative_mae,
         is_demo=is_demo,
         is_degraded=is_degraded,
+        forecast_source=forecast_source,
     )

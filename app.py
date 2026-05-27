@@ -264,7 +264,7 @@ def trend_figure(result: ForecastResult) -> go.Figure:
 
 def comparison_figure(result: ForecastResult) -> go.Figure:
     rows = [
-        {"model": result.primary_model_name, "prediction": result.primary_prediction, "type": "Weather-forecast model"},
+        {"model": result.primary_model_name, "prediction": result.primary_prediction, "type": "Primary tomorrow forecast"},
     ]
     if result.conservative_prediction is not None and result.conservative_model_name is not None:
         rows.append(
@@ -368,10 +368,9 @@ def main() -> None:
         st.markdown(
             f"""
             <div class="notice-box">
-            <strong>Forecast produced with weather fallback.</strong><br>
-            The app produced a live PM2.5 forecast for {result.target_date}, but the weather forecast API was unavailable or rate-limited. 
-            Weather features were filled with same-season historical weather averages from the packaged Nanjing dataset. 
-            Treat this as a degraded forecast, not the highest-confidence live-weather version.
+            <strong>Forecast produced with fallback inputs.</strong><br>
+            The app still produced a forecast for {result.target_date}, but one or more Open-Meteo live inputs were unavailable or rate-limited. 
+            The status box below states exactly which fallback was used. Treat this as a lower-confidence forecast, not the highest-confidence live version.
             </div>
             """,
             unsafe_allow_html=True,
@@ -379,13 +378,16 @@ def main() -> None:
     elif result.target_date != reference_date + timedelta(days=1):
         st.markdown(
             f"""
-            <div class="notice-box">
-            <strong>Forecast date adjusted.</strong><br>
-            Requested target: {reference_date + timedelta(days=1)}. Produced target: {result.target_date}.
+            <div class="error-box">
+            <strong>Live forecast cannot use the requested target date.</strong><br>
+            Requested target: {reference_date + timedelta(days=1)}. The available live PM2.5 sequence only supports {result.target_date}. 
+            This usually means the cloud app is still running an older file version or Open-Meteo returned stale air-quality data. 
+            The app stops here rather than showing a misleading tomorrow forecast.
             </div>
             """,
             unsafe_allow_html=True,
         )
+        return
 
     st.markdown(
         f"""
@@ -412,7 +414,7 @@ def main() -> None:
         render_small_card(
             "Latest PM2.5 Input",
             f"{result.latest_pm25:.1f}",
-            f"Latest usable day: {result.latest_pm25_date}; hourly values: {result.latest_pm25_hours or 'n/a'}.",
+            f"Latest history day: {result.latest_pm25_date}; forecast/input hours: {result.latest_pm25_hours or 'n/a'}.",
         )
     with c3:
         render_small_card(
@@ -422,9 +424,9 @@ def main() -> None:
         )
     with c4:
         render_small_card(
-            "Primary Model",
+            "Forecast Source",
             result.primary_model_name,
-            f"Holdout MAE: {result.primary_mae:.2f}; lower MAE is better.",
+            f"Uncertainty range uses research-model MAE: {result.primary_mae:.2f}.",
         )
 
     st.markdown(
@@ -465,13 +467,13 @@ def main() -> None:
             """
             ### What the app predicts
 
-            The target is daily average PM2.5 for Nanjing on the next valid forecast date.
+            The target is tomorrow's daily average PM2.5 for Nanjing.
 
-            ### Why two models are shown
+            ### Why two estimates are shown
 
-            The primary model uses the strongest trained model from the research project, with tomorrow's weather supplied by the Open-Meteo weather forecast API. This avoids using tomorrow's observed weather, which would not be available at prediction time.
+            The primary website forecast uses Open-Meteo's Air Quality PM2.5 forecast for the target day, aggregated from hourly values into a daily mean. This makes the website usable as an actual tomorrow forecast instead of failing whenever research-model lag inputs are incomplete.
 
-            The conservative cross-check model uses the stricter one-day-ahead model trained on lagged PM2.5, previous-day weather, and calendar variables. It is less accurate on the historical holdout set, but it is a useful sanity check.
+            The conservative cross-check model uses the stricter one-day-ahead research model trained on lagged PM2.5, previous-day weather, and calendar variables. It is shown as a secondary reference, not as a blocker for the app's tomorrow forecast.
 
             ### What the numbers mean
 
