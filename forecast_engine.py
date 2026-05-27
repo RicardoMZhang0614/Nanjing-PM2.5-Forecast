@@ -149,6 +149,7 @@ class ForecastResult:
     primary_mae: float
     conservative_mae: float | None
     is_demo: bool = False
+    is_degraded: bool = False
 
 
 class ForecastInputError(RuntimeError):
@@ -417,6 +418,37 @@ def weather_for_packaged_target(target_date: date) -> pd.DataFrame:
     return window[["date"] + WEATHER_COLUMNS].reset_index(drop=True)
 
 
+def weather_climatology_for_target(target_date: date) -> pd.DataFrame:
+    packaged = load_packaged_dataset()
+    packaged["date_only"] = packaged["date"].dt.date
+    packaged["day_of_year"] = packaged["date"].dt.dayofyear
+    target_doy = target_date.timetuple().tm_yday
+
+    def circular_distance(value: int) -> int:
+        raw = abs(value - target_doy)
+        return min(raw, 366 - raw)
+
+    packaged["doy_distance"] = packaged["day_of_year"].apply(circular_distance)
+    target_weather = packaged.nsmallest(45, "doy_distance")[WEATHER_COLUMNS].mean().to_dict()
+
+    previous_date = target_date - timedelta(days=1)
+    previous_doy = previous_date.timetuple().tm_yday
+
+    def previous_distance(value: int) -> int:
+        raw = abs(value - previous_doy)
+        return min(raw, 366 - raw)
+
+    packaged["previous_distance"] = packaged["day_of_year"].apply(previous_distance)
+    previous_weather = packaged.nsmallest(45, "previous_distance")[WEATHER_COLUMNS].mean().to_dict()
+
+    return pd.DataFrame(
+        [
+            {"date": pd.Timestamp(previous_date), **previous_weather},
+            {"date": pd.Timestamp(target_date), **target_weather},
+        ]
+    )
+
+
 def feature_rows(
     target_date: date,
     history: pd.DataFrame,
@@ -458,9 +490,20 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
     if use_live:
         try:
             history, target_date, data_note = choose_live_history(reference_date, requested_target)
-            weather_daily = fetch_weather_window(target_date - timedelta(days=1), target_date)
-            weather_note = "Weather inputs come from the Open-Meteo forecast endpoint for the target day."
-            data_mode = "live forecast"
+            is_degraded = False
+            try:
+                weather_daily = fetch_weather_window(target_date - timedelta(days=1), target_date)
+                weather_note = "Weather inputs come from the Open-Meteo forecast endpoint for the target day."
+                data_mode = "live forecast"
+            except Exception as weather_exc:
+                weather_daily = weather_climatology_for_target(target_date)
+                weather_note = (
+                    "Open-Meteo weather forecast was unavailable or rate-limited, so the app used "
+                    "seasonal weather climatology from the packaged Nanjing training dataset. "
+                    f"Weather API detail: {weather_exc}"
+                )
+                data_mode = "live PM2.5 with climatology weather fallback"
+                is_degraded = True
             is_demo = False
         except Exception as exc:
             raise ForecastInputError(
@@ -473,6 +516,7 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
         weather_note = "Weather inputs come from the packaged historical dataset for validation/demo mode."
         data_mode = "historical demo"
         is_demo = True
+        is_degraded = False
 
     primary_frame, conservative_frame = feature_rows(
         target_date=target_date,
@@ -518,4 +562,5 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
         primary_mae=primary_mae,
         conservative_mae=conservative_mae,
         is_demo=is_demo,
+        is_degraded=is_degraded,
     )

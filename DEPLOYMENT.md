@@ -63,4 +63,6 @@ No API key is required. The app uses public Open-Meteo endpoints.
 
 The first deployment may take a few minutes because packages such as xgboost and lightgbm need to install.
 
-If the cloud app cannot access Open-Meteo, it will still open in packaged demo mode, but live tomorrow prediction will not be available until the network request succeeds.
+If the cloud app can access recent Open-Meteo PM2.5 data but the weather forecast endpoint is rate-limited, it will produce a degraded live forecast using same-season historical weather averages and label this clearly in the interface.
+
+If the cloud app cannot access recent Open-Meteo PM2.5 data at all, live tomorrow prediction will not be available until the network request succeeds. Turn off live mode only to view the packaged historical validation demo.

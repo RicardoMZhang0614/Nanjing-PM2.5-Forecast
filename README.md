@@ -26,6 +26,8 @@ The app also runs a conservative cross-check model:
 
 The displayed uncertainty range uses the more conservative MAE so the app does not overstate precision.
 
+If the Open-Meteo weather forecast endpoint is temporarily rate-limited, the app can still produce a degraded live forecast by combining live recent PM2.5 data with same-season weather averages from the packaged Nanjing training dataset. The interface labels this clearly as a fallback forecast.
+
 ## How to Run
 
 From the main project folder:

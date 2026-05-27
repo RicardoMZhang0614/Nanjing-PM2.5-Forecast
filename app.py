@@ -351,6 +351,7 @@ def main() -> None:
         return
 
     is_demo_result = bool(getattr(result, "is_demo", result.data_mode in {"historical demo", "packaged demo"}))
+    is_degraded_result = bool(getattr(result, "is_degraded", "fallback" in result.data_mode.lower()))
 
     if is_demo_result:
         st.markdown(
@@ -359,6 +360,18 @@ def main() -> None:
             <strong>Historical demo mode.</strong><br>
             This is not tomorrow's live forecast. It replays the packaged historical validation date: {result.target_date}.
             Turn on live mode to forecast {reference_date + timedelta(days=1)}.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    elif is_degraded_result:
+        st.markdown(
+            f"""
+            <div class="notice-box">
+            <strong>Forecast produced with weather fallback.</strong><br>
+            The app produced a live PM2.5 forecast for {result.target_date}, but the weather forecast API was unavailable or rate-limited. 
+            Weather features were filled with same-season historical weather averages from the packaged Nanjing dataset. 
+            Treat this as a degraded forecast, not the highest-confidence live-weather version.
             </div>
             """,
             unsafe_allow_html=True,
