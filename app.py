@@ -432,10 +432,10 @@ def main() -> None:
     st.markdown(
         f"""
         <div class="status-box">
-        <strong>Data mode:</strong> {result.data_mode}<br>
-        <strong>Air-quality input:</strong> {result.data_note}<br>
-        <strong>Weather input:</strong> {result.weather_note}<br>
-        <strong>Generated:</strong> {result.generated_at.strftime('%Y-%m-%d %H:%M:%S')}
+        <strong>Forecast mode:</strong> {result.data_mode}<br>
+        <strong>PM2.5 source:</strong> {result.data_note}<br>
+        <strong>Weather source:</strong> {result.weather_note}<br>
+        <strong>Generated at:</strong> {result.generated_at.strftime('%Y-%m-%d %H:%M:%S')}
         </div>
         """,
         unsafe_allow_html=True,

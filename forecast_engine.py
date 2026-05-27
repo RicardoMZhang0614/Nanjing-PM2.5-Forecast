@@ -193,6 +193,20 @@ def _request_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def user_facing_api_status(exc: Exception) -> str:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code == 429:
+        return "Open-Meteo returned HTTP 429 Too Many Requests."
+    if status_code:
+        return f"Open-Meteo returned HTTP {status_code}."
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "Open-Meteo request timed out."
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "Open-Meteo connection failed."
+    return "Open-Meteo request failed."
+
+
 def _hourly_payload_to_frame(payload: dict[str, Any]) -> pd.DataFrame:
     frame = pd.DataFrame(payload["hourly"])
     frame["time"] = pd.to_datetime(frame["time"])
@@ -593,9 +607,8 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
             except Exception as weather_exc:
                 weather_daily = weather_climatology_for_target(target_date)
                 weather_note = (
-                    "Open-Meteo weather forecast was unavailable or rate-limited, so the app used "
+                    f"{user_facing_api_status(weather_exc)} The app used "
                     "seasonal weather climatology from the packaged Nanjing training dataset. "
-                    f"Weather API detail: {weather_exc}"
                 )
                 data_mode = "live PM2.5 with climatology weather fallback"
                 is_degraded = True
@@ -605,9 +618,8 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
             history, operational_prediction = pm25_climatology_series(target_date)
             weather_daily = weather_climatology_for_target(target_date)
             data_note = (
-                "Open-Meteo live PM2.5 forecast was unavailable or rate-limited. "
+                f"{user_facing_api_status(exc)} "
                 "The app used a same-season historical PM2.5 baseline from the packaged Nanjing dataset. "
-                f"Live API detail: {exc}"
             )
             weather_note = "Weather features use same-season historical weather averages from the packaged Nanjing dataset."
             data_mode = "seasonal PM2.5 fallback"
