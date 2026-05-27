@@ -148,6 +148,7 @@ class ForecastResult:
     weather_daily: pd.DataFrame
     primary_mae: float
     conservative_mae: float | None
+    is_demo: bool = False
 
 
 class ForecastInputError(RuntimeError):
@@ -239,7 +240,7 @@ def _aggregate_weather(hourly: pd.DataFrame) -> pd.DataFrame:
 
 def fetch_recent_pm25(reference_date: date, lookback_days: int = 80) -> pd.DataFrame:
     start_date = reference_date - timedelta(days=lookback_days)
-    params = {
+    dated_params = {
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
         "start_date": start_date.isoformat(),
@@ -247,7 +248,18 @@ def fetch_recent_pm25(reference_date: date, lookback_days: int = 80) -> pd.DataF
         "timezone": TIMEZONE,
         "hourly": "pm2_5",
     }
-    payload = _request_json(AIR_QUALITY_URL, params)
+    relative_params = {
+        "latitude": LATITUDE,
+        "longitude": LONGITUDE,
+        "past_days": min(92, lookback_days),
+        "forecast_days": 2,
+        "timezone": TIMEZONE,
+        "hourly": "pm2_5",
+    }
+    try:
+        payload = _request_json(AIR_QUALITY_URL, dated_params)
+    except Exception:
+        payload = _request_json(AIR_QUALITY_URL, relative_params)
     return _aggregate_air_quality(_hourly_payload_to_frame(payload))
 
 
@@ -347,16 +359,23 @@ def choose_live_history(reference_date: date, requested_target: date) -> tuple[p
 
     if not today_rows.empty and int(today_rows.iloc[-1]["pm25_hour_count"]) >= 8:
         usable = pd.concat([complete_rows, today_rows.tail(1)], ignore_index=True).sort_values("date")
-        note = "Live mode: today's PM2.5 is used as the latest lag because at least 8 hourly values were available."
+        note = "Live mode: today's PM2.5 is used as the latest lag because at least 8 hourly Open-Meteo values were available."
     else:
-        usable = complete_rows
-        note = "Live mode: today's PM2.5 was not complete enough, so the app uses the latest complete day instead."
+        if live.empty:
+            raise ForecastInputError("Open-Meteo did not return usable recent PM2.5 values.")
+        usable = live[live["date_only"] < requested_target].tail(80).copy()
+        note = "Live mode: today's complete PM2.5 was not available, so the app uses the latest Open-Meteo PM2.5 values before the target date."
 
     if usable.empty:
         raise ForecastInputError("No usable recent PM2.5 records were returned by Open-Meteo.")
 
     latest_date = usable["date"].max().date()
-    target_date = requested_target if latest_date >= requested_target - timedelta(days=1) else latest_date + timedelta(days=1)
+    if latest_date < requested_target - timedelta(days=1):
+        raise ForecastInputError(
+            "Live PM2.5 data are too old to support a next-day forecast. "
+            f"Latest usable PM2.5 date: {latest_date}; required: {requested_target - timedelta(days=1)}."
+        )
+    target_date = requested_target
     usable = usable.drop(columns=["date_only"]).reset_index(drop=True)
     return usable, target_date, note
 
@@ -436,21 +455,24 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
     primary_model, conservative_model, primary_features, conservative_features = load_models()
     primary_model_name, primary_mae, conservative_model_name, conservative_mae = load_model_metrics()
 
-    data_mode = "live"
-    try:
-        if use_live:
+    if use_live:
+        try:
             history, target_date, data_note = choose_live_history(reference_date, requested_target)
             weather_daily = fetch_weather_window(target_date - timedelta(days=1), target_date)
             weather_note = "Weather inputs come from the Open-Meteo forecast endpoint for the target day."
-        else:
-            raise ForecastInputError("Live mode disabled.")
-    except Exception as exc:
+            data_mode = "live forecast"
+            is_demo = False
+        except Exception as exc:
+            raise ForecastInputError(
+                "Live next-day forecast is unavailable because the app could not retrieve sufficiently recent "
+                f"Open-Meteo inputs. Details: {exc}"
+            ) from exc
+    else:
         history, target_date, data_note = choose_packaged_demo_history()
         weather_daily = weather_for_packaged_target(target_date)
         weather_note = "Weather inputs come from the packaged historical dataset for validation/demo mode."
-        data_mode = "packaged demo"
-        if use_live:
-            data_note = f"{data_note} Live retrieval failed: {exc}"
+        data_mode = "historical demo"
+        is_demo = True
 
     primary_frame, conservative_frame = feature_rows(
         target_date=target_date,
@@ -495,4 +517,5 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
         weather_daily=weather_daily,
         primary_mae=primary_mae,
         conservative_mae=conservative_mae,
+        is_demo=is_demo,
     )

@@ -25,20 +25,28 @@ def style_page() -> None:
         """
         <style>
         [data-testid="stAppViewContainer"] {
-            background: #F5F7FA;
+            background: #F5F7FA !important;
+            color: #17212F !important;
         }
         .block-container {
             max-width: 1180px;
             padding-top: 2rem;
             padding-bottom: 2rem;
-            color: #17212F;
+            color: #17212F !important;
+        }
+        [data-testid="stSidebar"] {
+            background: #FFFFFF !important;
+            color: #17212F !important;
+        }
+        [data-testid="stSidebar"] * {
+            color: #17212F !important;
         }
         h1, h2, h3 {
-            color: #17212F;
+            color: #17212F !important;
             letter-spacing: 0;
         }
         .hero-subtitle {
-            color: #566274;
+            color: #566274 !important;
             font-size: 1rem;
             line-height: 1.45;
             max-width: 850px;
@@ -47,13 +55,13 @@ def style_page() -> None:
         .forecast-card {
             border: 1px solid #D9E0EA;
             border-radius: 8px;
-            background: #FFFFFF;
+            background: #FFFFFF !important;
             padding: 22px 24px;
             box-shadow: 0 10px 22px rgba(16, 24, 40, 0.06);
             margin-bottom: 1rem;
         }
         .forecast-label {
-            color: #566274;
+            color: #566274 !important;
             font-size: 0.84rem;
             font-weight: 700;
             text-transform: uppercase;
@@ -61,14 +69,14 @@ def style_page() -> None:
             margin-bottom: 0.35rem;
         }
         .forecast-value {
-            color: #17212F;
+            color: #17212F !important;
             font-size: 3rem;
             line-height: 1;
             font-weight: 800;
             margin-bottom: 0.5rem;
         }
         .forecast-unit {
-            color: #566274;
+            color: #566274 !important;
             font-size: 0.9rem;
             line-height: 1.35;
         }
@@ -84,30 +92,30 @@ def style_page() -> None:
             min-height: 132px;
             border: 1px solid #D9E0EA;
             border-radius: 8px;
-            background: #FFFFFF;
+            background: #FFFFFF !important;
             padding: 15px 16px;
             box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
         }
         .small-label {
-            color: #344054;
+            color: #344054 !important;
             font-size: 0.88rem;
             font-weight: 750;
             margin-bottom: 7px;
         }
         .small-value {
-            color: #17212F;
+            color: #17212F !important;
             font-size: 1.45rem;
             font-weight: 780;
             line-height: 1.18;
             margin-bottom: 8px;
         }
         .small-note {
-            color: #566274;
+            color: #566274 !important;
             font-size: 0.82rem;
             line-height: 1.38;
         }
         .section-note {
-            color: #566274;
+            color: #566274 !important;
             font-size: 0.94rem;
             line-height: 1.45;
             margin-bottom: 0.65rem;
@@ -116,12 +124,40 @@ def style_page() -> None:
             border: 1px solid #D9E0EA;
             border-left: 5px solid #245A8D;
             border-radius: 8px;
-            background: #FFFFFF;
+            background: #FFFFFF !important;
             padding: 13px 15px;
-            color: #344054;
+            color: #344054 !important;
             font-size: 0.9rem;
             line-height: 1.42;
             margin-bottom: 1rem;
+        }
+        .notice-box {
+            border: 1px solid #D8A13A;
+            border-left: 5px solid #A86817;
+            border-radius: 8px;
+            background: #FFF7E0 !important;
+            color: #17212F !important;
+            padding: 13px 15px;
+            font-size: 0.92rem;
+            line-height: 1.45;
+            margin: 0.75rem 0 1rem 0;
+        }
+        .error-box {
+            border: 1px solid #E0A0A0;
+            border-left: 5px solid #9C3434;
+            border-radius: 8px;
+            background: #FFF1F1 !important;
+            color: #17212F !important;
+            padding: 13px 15px;
+            font-size: 0.92rem;
+            line-height: 1.45;
+            margin: 0.75rem 0 1rem 0;
+        }
+        .notice-box strong, .error-box strong {
+            color: #17212F !important;
+        }
+        .stTabs [data-baseweb="tab"] {
+            color: #344054 !important;
         }
         </style>
         """,
@@ -158,8 +194,20 @@ def apply_layout(fig: go.Figure, height: int) -> go.Figure:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         hoverlabel=dict(bgcolor="white", bordercolor=COLOR_BORDER, font=dict(color=COLOR_TEXT)),
     )
-    fig.update_xaxes(showgrid=False, linecolor=COLOR_BORDER, zeroline=False)
-    fig.update_yaxes(gridcolor="#E8EDF4", linecolor=COLOR_BORDER, zeroline=False)
+    fig.update_xaxes(
+        showgrid=False,
+        linecolor="#AEB8C6",
+        zeroline=False,
+        tickfont=dict(color="#344054", size=12),
+        title_font=dict(color="#17212F", size=13),
+    )
+    fig.update_yaxes(
+        gridcolor="#D5DCE7",
+        linecolor="#AEB8C6",
+        zeroline=False,
+        tickfont=dict(color="#344054", size=12),
+        title_font=dict(color="#17212F", size=13),
+    )
     return fig
 
 
@@ -174,7 +222,7 @@ def trend_figure(result: ForecastResult) -> go.Figure:
             y=history["pm25"],
             mode="lines",
             name="Recent daily PM2.5",
-            line=dict(color="rgba(86,98,116,0.55)", width=1.6),
+            line=dict(color="rgba(86,98,116,0.72)", width=1.7),
             hovertemplate="%{x|%Y-%m-%d}<br>PM2.5: %{y:.1f}<extra></extra>",
         )
     )
@@ -281,7 +329,7 @@ def main() -> None:
     st.sidebar.header("Forecast Controls")
     reference_date = st.sidebar.date_input("Reference date", value=date.today())
     use_live = st.sidebar.checkbox("Use live Open-Meteo data", value=True)
-    st.sidebar.caption("If live data cannot be reached, the app switches to a packaged historical demo so the interface still works.")
+    st.sidebar.caption("Live mode predicts the next day. Turn it off only for a packaged historical demo.")
     if st.sidebar.button("Refresh forecast"):
         cached_prediction.clear()
 
@@ -289,13 +337,39 @@ def main() -> None:
         with st.spinner("Building forecast inputs and running models..."):
             result = cached_prediction(reference_date=reference_date, use_live=use_live)
     except ForecastInputError as exc:
-        st.error(str(exc))
+        st.markdown(
+            f"""
+            <div class="error-box">
+            <strong>Live forecast could not be produced.</strong><br>
+            {str(exc)}<br><br>
+            This app now stops instead of replacing tomorrow's forecast with a historical demo date. 
+            Check the Streamlit Cloud logs or temporarily turn off live mode to view the packaged validation demo.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         return
 
-    if result.target_date != reference_date + timedelta(days=1):
-        st.warning(
-            f"The app could not form a reliable forecast for {reference_date + timedelta(days=1)}. "
-            f"It produced the next valid forecast date instead: {result.target_date}."
+    if result.is_demo:
+        st.markdown(
+            f"""
+            <div class="notice-box">
+            <strong>Historical demo mode.</strong><br>
+            This is not tomorrow's live forecast. It replays the packaged historical validation date: {result.target_date}.
+            Turn on live mode to forecast {reference_date + timedelta(days=1)}.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    elif result.target_date != reference_date + timedelta(days=1):
+        st.markdown(
+            f"""
+            <div class="notice-box">
+            <strong>Forecast date adjusted.</strong><br>
+            Requested target: {reference_date + timedelta(days=1)}. Produced target: {result.target_date}.
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     st.markdown(

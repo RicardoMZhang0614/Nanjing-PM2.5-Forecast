@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
-from forecast_engine import predict_pm25
+from forecast_engine import ForecastInputError, predict_pm25
 
 
 def check(condition: bool, message: str) -> None:
@@ -20,6 +20,13 @@ def main() -> None:
     check(len(result.feature_row.columns) == 39, "primary feature row has 39 columns")
     check(len(result.history) >= 30, "at least 30 recent PM2.5 days are available")
     print("VALIDATION PASSED")
+
+    try:
+        live = predict_pm25(reference_date=date.today(), use_live=True)
+        check(live.target_date == date.today() + timedelta(days=1), "live forecast targets tomorrow")
+        print(f"LIVE CHECK PASSED: {live.target_date}, {live.primary_prediction:.2f}, {live.category}")
+    except ForecastInputError as exc:
+        print(f"LIVE CHECK SKIPPED/FAILED: {exc}")
 
 
 if __name__ == "__main__":
