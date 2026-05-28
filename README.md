@@ -27,7 +27,9 @@ The app also runs or displays research-model context where available:
 
 The displayed uncertainty range uses the more conservative MAE so the app does not overstate precision.
 
-For past target dates covered by the packaged dataset, the app switches into historical validation mode. It shows the model prediction, the actual observed PM2.5 value, and the absolute error for that day. This is a single-day check; the MAE values above are the broader holdout-test accuracy summary.
+For past target dates, the app switches into historical validation mode. If the date is covered by the packaged dataset, it uses the packaged observed PM2.5 value. For later past dates, it tries to retrieve the observed PM2.5 value from Open-Meteo historical air-quality data. When an observed value is available, the page shows the model prediction, the actual PM2.5 value, and the absolute error for that day. This is a single-day check; the MAE values above are the broader holdout-test accuracy summary.
+
+If the public air-quality API is temporarily rate-limited, the app labels the historical observed value as unavailable instead of inventing an actual value or showing a fake zero error.
 
 For live PM2.5 lags, the app first uses Open-Meteo's relative `past_days` / `forecast_days` request format rather than a fixed historical date range. This is important because fixed date-range requests can return stale modeled air-quality archives, while the relative request is better suited for current short-term use.
 

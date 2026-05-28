@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from forecast_engine import ForecastInputError, ForecastResult, holiday_name, predict_pm25
+from forecast_engine import ForecastInputError, ForecastResult, current_local_date, holiday_name, predict_pm25
 
 
 COLOR_TEXT = "#17212F"
@@ -373,6 +373,7 @@ def main() -> None:
     is_demo_result = bool(getattr(result, "is_demo", result.data_mode in {"historical demo", "packaged demo"}))
     is_degraded_result = bool(getattr(result, "is_degraded", "fallback" in result.data_mode.lower()))
     has_actual_value = result.actual_pm25 is not None
+    is_historical_target = result.target_date < current_local_date()
 
     if has_actual_value and not is_demo_result:
         st.markdown(
@@ -380,6 +381,17 @@ def main() -> None:
             <div class="notice-box">
             <strong>Historical validation mode.</strong><br>
             The selected target date already has an observed PM2.5 value in the packaged dataset, so this page shows the prediction, the actual value, and the absolute error.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    elif is_historical_target:
+        st.markdown(
+            f"""
+            <div class="notice-box">
+            <strong>Historical actual value unavailable.</strong><br>
+            The selected target date is in the past, but the app could not retrieve the observed PM2.5 value from the online air-quality source at this moment. 
+            This usually happens when the public API is rate-limited. The page still shows a lower-confidence fallback estimate, but it cannot calculate historical error until the observed value is available.
             </div>
             """,
             unsafe_allow_html=True,
@@ -440,7 +452,7 @@ def main() -> None:
             render_small_card(
                 "Actual PM2.5",
                 f"{result.actual_pm25:.1f}",
-                "Observed daily mean in the packaged validation dataset.",
+                f"Observed daily mean from {result.actual_pm25_source or 'historical data'}.",
             )
         with c2:
             render_small_card(
@@ -491,6 +503,7 @@ def main() -> None:
         <div class="status-box">
         <strong>Forecast mode:</strong> {result.data_mode}<br>
         <strong>PM2.5 source:</strong> {result.data_note}<br>
+        {f'<strong>Actual PM2.5 source:</strong> {result.actual_pm25_source}<br>' if result.actual_pm25_source else ''}
         <strong>Weather source:</strong> {result.weather_note}<br>
         <strong>Generated at:</strong> {result.generated_at.strftime('%Y-%m-%d %H:%M:%S')}
         </div>
