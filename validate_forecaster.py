@@ -19,6 +19,8 @@ def main() -> None:
     check(result.expected_low <= result.primary_prediction <= result.expected_high, "prediction lies inside displayed range")
     check(len(result.feature_row.columns) == 39, "primary feature row has 39 columns")
     check(len(result.history) >= 30, "at least 30 recent PM2.5 days are available")
+    check(result.actual_pm25 is not None, "historical validation returns an actual PM2.5 value")
+    check(result.absolute_error is not None and result.absolute_error >= 0, "historical validation returns absolute error")
     print("VALIDATION PASSED")
 
     try:

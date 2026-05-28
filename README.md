@@ -14,6 +14,7 @@ The original research project explains historical PM2.5 variation. This app turn
 - recent PM2.5 trend and forecast marker
 - cross-check between the main XGBoost model and the conservative one-day-ahead model
 - key input variables used by the model
+- historical validation output with observed PM2.5 and single-day absolute error when the selected target date is already covered by the packaged dataset
 
 ## Forecast Logic
 
@@ -25,6 +26,8 @@ The app also runs or displays research-model context where available:
 - Conservative model: Forecast Random Forest, historical holdout MAE 14.13
 
 The displayed uncertainty range uses the more conservative MAE so the app does not overstate precision.
+
+For past target dates covered by the packaged dataset, the app switches into historical validation mode. It shows the model prediction, the actual observed PM2.5 value, and the absolute error for that day. This is a single-day check; the MAE values above are the broader holdout-test accuracy summary.
 
 For live PM2.5 lags, the app first uses Open-Meteo's relative `past_days` / `forecast_days` request format rather than a fixed historical date range. This is important because fixed date-range requests can return stale modeled air-quality archives, while the relative request is better suited for current short-term use.
 

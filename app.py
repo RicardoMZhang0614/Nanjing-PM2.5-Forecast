@@ -215,6 +215,7 @@ def trend_figure(result: ForecastResult) -> go.Figure:
     history = result.history.copy()
     forecast_x = [pd.Timestamp(result.target_date)]
     forecast_y = [result.primary_prediction]
+    marker_name = "Prediction" if result.actual_pm25 is not None else "Tomorrow forecast"
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -241,7 +242,7 @@ def trend_figure(result: ForecastResult) -> go.Figure:
             x=forecast_x,
             y=forecast_y,
             mode="markers",
-            name="Tomorrow forecast",
+            name=marker_name,
             marker=dict(size=15, color=result.category_color, line=dict(color="#FFFFFF", width=2)),
             error_y=dict(
                 type="data",
@@ -251,11 +252,22 @@ def trend_figure(result: ForecastResult) -> go.Figure:
                 thickness=1.6,
                 color=result.category_color,
             ),
-            hovertemplate="%{x|%Y-%m-%d}<br>Forecast: %{y:.1f}<extra></extra>",
+            hovertemplate="%{x|%Y-%m-%d}<br>Prediction: %{y:.1f}<extra></extra>",
         )
     )
+    if result.actual_pm25 is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=forecast_x,
+                y=[result.actual_pm25],
+                mode="markers",
+                name="Actual PM2.5",
+                marker=dict(size=14, color=COLOR_GREEN, symbol="diamond", line=dict(color="#FFFFFF", width=2)),
+                hovertemplate="%{x|%Y-%m-%d}<br>Actual: %{y:.1f}<extra></extra>",
+            )
+        )
     fig.update_layout(
-        title="Recent PM2.5 History and Tomorrow Forecast",
+        title="Recent PM2.5 History and Forecast Target",
         xaxis_title="",
         yaxis_title="PM2.5 (micrograms per cubic meter)",
     )
@@ -264,7 +276,7 @@ def trend_figure(result: ForecastResult) -> go.Figure:
 
 def comparison_figure(result: ForecastResult) -> go.Figure:
     rows = [
-        {"model": result.primary_model_name, "prediction": result.primary_prediction, "type": "Primary tomorrow forecast"},
+        {"model": result.primary_model_name, "prediction": result.primary_prediction, "type": "Primary prediction"},
     ]
     if result.conservative_prediction is not None and result.conservative_model_name is not None:
         rows.append(
@@ -272,6 +284,14 @@ def comparison_figure(result: ForecastResult) -> go.Figure:
                 "model": result.conservative_model_name.replace("Forecast ", ""),
                 "prediction": result.conservative_prediction,
                 "type": "Conservative lag model",
+            }
+        )
+    if result.actual_pm25 is not None:
+        rows.append(
+            {
+                "model": "Observed value",
+                "prediction": result.actual_pm25,
+                "type": "Actual PM2.5",
             }
         )
     frame = pd.DataFrame(rows)
@@ -282,9 +302,9 @@ def comparison_figure(result: ForecastResult) -> go.Figure:
         orientation="h",
         text=frame["prediction"].map(lambda value: f"{value:.1f}"),
         color="type",
-        color_discrete_sequence=[COLOR_BLUE, COLOR_AMBER],
-        labels={"prediction": "Predicted PM2.5", "type": ""},
-        title="Prediction Cross-Check",
+        color_discrete_sequence=[COLOR_BLUE, COLOR_AMBER, COLOR_GREEN],
+        labels={"prediction": "PM2.5", "type": ""},
+        title="Prediction Cross-Check" if result.actual_pm25 is None else "Prediction vs Actual",
     )
     fig.update_traces(textposition="outside", cliponaxis=False)
     return apply_layout(fig, 260)
@@ -352,8 +372,19 @@ def main() -> None:
 
     is_demo_result = bool(getattr(result, "is_demo", result.data_mode in {"historical demo", "packaged demo"}))
     is_degraded_result = bool(getattr(result, "is_degraded", "fallback" in result.data_mode.lower()))
+    has_actual_value = result.actual_pm25 is not None
 
-    if is_demo_result:
+    if has_actual_value and not is_demo_result:
+        st.markdown(
+            f"""
+            <div class="notice-box">
+            <strong>Historical validation mode.</strong><br>
+            The selected target date already has an observed PM2.5 value in the packaged dataset, so this page shows the prediction, the actual value, and the absolute error.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    elif is_demo_result:
         st.markdown(
             f"""
             <div class="notice-box">
@@ -404,30 +435,56 @@ def main() -> None:
     )
 
     c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        render_small_card(
-            "Expected Range",
-            f"{result.expected_low:.1f}-{result.expected_high:.1f}",
-            f"Range uses conservative one-day-ahead MAE of {result.uncertainty_mae:.2f}.",
-        )
-    with c2:
-        render_small_card(
-            "Latest PM2.5 Input",
-            f"{result.latest_pm25:.1f}",
-            f"Latest history day: {result.latest_pm25_date}; forecast/input hours: {result.latest_pm25_hours or 'n/a'}.",
-        )
-    with c3:
-        render_small_card(
-            "Holiday Context",
-            holiday_name(result.target_date),
-            "Calendar variables are encoded consistently with the training pipeline.",
-        )
-    with c4:
-        render_small_card(
-            "Forecast Source",
-            result.primary_model_name,
-            f"Uncertainty range uses research-model MAE: {result.primary_mae:.2f}.",
-        )
+    if has_actual_value:
+        with c1:
+            render_small_card(
+                "Actual PM2.5",
+                f"{result.actual_pm25:.1f}",
+                "Observed daily mean in the packaged validation dataset.",
+            )
+        with c2:
+            render_small_card(
+                "Absolute Error",
+                f"{result.absolute_error:.1f}",
+                "Lower is better. This is the gap between prediction and actual value.",
+            )
+        with c3:
+            render_small_card(
+                "Test-Benchmark MAE",
+                f"{result.primary_mae:.2f}",
+                "Historical holdout average absolute error for this model family.",
+            )
+        with c4:
+            render_small_card(
+                "Forecast Source",
+                result.primary_model_name,
+                "Historical validation uses the trained research model.",
+            )
+    else:
+        with c1:
+            render_small_card(
+                "Expected Range",
+                f"{result.expected_low:.1f}-{result.expected_high:.1f}",
+                f"Range uses conservative one-day-ahead MAE of {result.uncertainty_mae:.2f}.",
+            )
+        with c2:
+            render_small_card(
+                "Latest PM2.5 Input",
+                f"{result.latest_pm25:.1f}",
+                f"Latest history day: {result.latest_pm25_date}; forecast/input hours: {result.latest_pm25_hours or 'n/a'}.",
+            )
+        with c3:
+            render_small_card(
+                "Holiday Context",
+                holiday_name(result.target_date),
+                "Calendar variables are encoded consistently with the training pipeline.",
+            )
+        with c4:
+            render_small_card(
+                "Forecast Source",
+                result.primary_model_name,
+                f"Uncertainty range uses research-model MAE: {result.primary_mae:.2f}.",
+            )
 
     st.markdown(
         f"""
@@ -478,6 +535,8 @@ def main() -> None:
             ### What the numbers mean
 
             MAE is mean absolute error, measured in PM2.5 units. A model MAE of 10.82 means the historical test predictions were off by about 10.82 micrograms per cubic meter on average.
+
+            In historical validation mode, the app also shows the actual observed PM2.5 for the selected target date and the absolute error for that single day. That single-day error is not the whole model accuracy; it is one example. The MAE is the broader test-set benchmark.
 
             ### Limitations
 

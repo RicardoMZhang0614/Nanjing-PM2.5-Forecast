@@ -129,6 +129,8 @@ class ForecastResult:
     generated_at: datetime
     location: str
     primary_prediction: float
+    actual_pm25: float | None
+    absolute_error: float | None
     conservative_prediction: float | None
     expected_low: float
     expected_high: float
@@ -417,11 +419,34 @@ def choose_live_history(reference_date: date, requested_target: date) -> tuple[p
     return usable, target_date, note
 
 
+def packaged_actual_pm25(target_date: date) -> float | None:
+    packaged = load_packaged_dataset()
+    target = packaged[packaged["date"].dt.date == target_date]
+    if target.empty:
+        return None
+    return float(target.iloc[0]["pm25"])
+
+
+def choose_packaged_history_for_target(target_date: date) -> tuple[pd.DataFrame, date, str]:
+    packaged = load_packaged_dataset()
+    target = packaged[packaged["date"].dt.date == target_date]
+    if target.empty:
+        raise ForecastInputError(f"The packaged validation dataset does not contain actual PM2.5 for {target_date}.")
+    history = packaged[packaged["date"].dt.date < target_date].copy()
+    if len(history) < 30:
+        raise ForecastInputError("At least 30 prior records are needed before a historical validation target.")
+    note = (
+        "Historical validation mode: the selected target date is inside the packaged dataset, "
+        "so the app shows both the one-day-ahead prediction and the observed PM2.5 value."
+    )
+    return history, target_date, note
+
+
 def choose_packaged_demo_history() -> tuple[pd.DataFrame, date, str]:
     packaged = load_packaged_dataset()
     target_date = packaged["date"].max().date()
-    history = packaged[packaged["date"].dt.date < target_date].copy()
-    note = "Packaged demo mode: live APIs were not used; this is a historical one-day-ahead demonstration."
+    history, _, _ = choose_packaged_history_for_target(target_date)
+    note = "Packaged demo mode: live APIs were not used; this replays the latest historical validation date."
     return history, target_date, note
 
 
@@ -587,8 +612,20 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
     requested_target = reference_date + timedelta(days=1)
     primary_model, conservative_model, primary_features, conservative_features = load_models()
     primary_model_name, primary_mae, conservative_model_name, conservative_mae = load_model_metrics()
+    packaged_actual = packaged_actual_pm25(requested_target)
 
-    if use_live:
+    if packaged_actual is not None and requested_target < date.today():
+        history, target_date, data_note = choose_packaged_history_for_target(requested_target)
+        weather_daily = weather_for_packaged_target(target_date)
+        weather_note = "Weather inputs come from the packaged historical dataset for this validation date."
+        data_mode = "historical validation"
+        target_pm25_hours = None
+        operational_prediction = None
+        operational_model_name = primary_model_name
+        operational_source = "Research ML model"
+        is_demo = False
+        is_degraded = False
+    elif use_live:
         try:
             target_date = requested_target
             air_quality_daily = fetch_recent_pm25(reference_date)
@@ -629,11 +666,16 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
             is_demo = False
             is_degraded = True
     else:
-        history, target_date, data_note = choose_packaged_demo_history()
+        try:
+            history, target_date, data_note = choose_packaged_history_for_target(requested_target)
+            data_mode = "historical validation"
+            is_demo = False
+        except ForecastInputError:
+            history, target_date, data_note = choose_packaged_demo_history()
+            data_mode = "historical demo"
+            is_demo = True
         weather_daily = weather_for_packaged_target(target_date)
         weather_note = "Weather inputs come from the packaged historical dataset for validation/demo mode."
-        data_mode = "historical demo"
-        is_demo = True
         is_degraded = False
         target_pm25_hours = None
         operational_prediction = None
@@ -668,6 +710,8 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
     expected_low = max(0.0, primary_prediction - uncertainty_mae)
     expected_high = primary_prediction + uncertainty_mae
     category = classify_pm25(primary_prediction)
+    actual_pm25 = packaged_actual_pm25(target_date)
+    absolute_error = abs(primary_prediction - actual_pm25) if actual_pm25 is not None else None
 
     latest = history.sort_values("date").iloc[-1]
     history_tail = history[["date", "pm25"]].sort_values("date").tail(60).reset_index(drop=True)
@@ -678,6 +722,8 @@ def predict_pm25(reference_date: date | None = None, use_live: bool = True) -> F
         generated_at=datetime.now(),
         location=LOCATION_NAME,
         primary_prediction=primary_prediction,
+        actual_pm25=actual_pm25,
+        absolute_error=absolute_error,
         conservative_prediction=conservative_prediction,
         expected_low=expected_low,
         expected_high=expected_high,
